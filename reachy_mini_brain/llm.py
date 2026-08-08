@@ -626,6 +626,7 @@ class LLMBrain:
         is_system_event=False,
         tools_used=None,
         agent=None,
+        handoff_resolver=None,
     ) -> list[dict[str, Any]]:
         """Run one full conversational turn (including any tool round-trips).
 
@@ -645,6 +646,15 @@ class LLMBrain:
         don't evict the local model's cached prefix. The tools array is ALWAYS
         the full set and dispatch is NEVER gated by the agent - a misroute can
         still reach the right tool.
+
+        `handoff_resolver(tool_names) -> agent|None` is the OPTIONAL bounded
+        1-hop misroute recovery (gated by config.ROUTER_HANDOFF_ENABLED, default
+        OFF). If the first completion is a PURE tool-call turn (no spoken
+        content yet) and every proposed tool is owned by one OTHER specialist,
+        the turn is re-focused to that owner and the first completion is re-run
+        ONCE. Nothing was spoken before the re-run, so there is no double-speech;
+        the SHARED_PREAMBLE prefix stays cached so only the short context tail
+        recomputes. Any failure/ambiguity leaves the original completion intact.
         """
         def _interrupted() -> bool:
             return interrupted is not None and interrupted.is_set()
@@ -704,6 +714,45 @@ class LLMBrain:
             messages, self.tools.to_openai_tools(), on_speak, user_language, interrupted
         )
         logger.info("[timing] LLM streamed %.2fs", time.time() - _t0)
+
+        # Optional bounded 1-hop misroute handoff (flag-gated, default OFF).
+        # ONLY when this was a PURE tool-call turn (no content spoken yet) do we
+        # consider re-focusing: nothing has been said, so re-running the first
+        # completion for the owning specialist can't cause double-speech. The
+        # resolver returns the sole OTHER specialist that owns every proposed
+        # tool, or None (unowned / spans specialists / already correct). We hop
+        # AT MOST once; the SHARED_PREAMBLE prefix stays cached so only the short
+        # context tail recomputes.
+        if (config.ROUTER_HANDOFF_ENABLED and handoff_resolver is not None
+                and use_specialist and tool_calls and not content
+                and not _interrupted()):
+            try:
+                owner = handoff_resolver([tc["name"] for tc in tool_calls])
+            except Exception as ex:  # noqa: BLE001 - handoff must never break a turn
+                logger.warning("Handoff resolver failed (%s); keeping route.", type(ex).__name__)
+                owner = None
+            if owner is not None and owner.name != agent.name:
+                logger.info("[route] handoff %s -> %s (tools=%s)",
+                            agent.name, owner.name, [tc["name"] for tc in tool_calls])
+                agent = owner
+                if deps is not None:
+                    setattr(deps, "current_specialist", owner.name)
+                # Rebuild the split layout for the new owner: same cached
+                # SHARED_PREAMBLE prefix, a fresh per-turn context tail. Track
+                # the new context_msg by identity so it's stripped from history.
+                context_seg = self._agent_context(agent, reply_language, speaker)
+                messages = [{"role": "system", "content": self._shared_preamble()}] + history
+                context_msg = {"role": "system", "content": context_seg}
+                messages.append(context_msg)
+                if is_system_event:
+                    messages.append({"role": "system", "content": user_text})
+                else:
+                    messages.append({"role": "user", "content": user_text})
+                _th = time.time()
+                content, tool_calls = self._stream_completion(
+                    messages, self.tools.to_openai_tools(), on_speak, user_language, interrupted
+                )
+                logger.info("[timing] LLM re-streamed after handoff %.2fs", time.time() - _th)
 
         # Rebuild the assistant message for the history/tool round-trip.
         assistant_msg: dict[str, Any] = {"role": "assistant"}

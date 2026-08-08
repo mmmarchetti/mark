@@ -662,6 +662,7 @@ class ReachyMiniBrain(ReachyMiniApp):
                         deps, history, text, language, on_speak,
                         interrupted=interrupted, is_system_event=system_event,
                         tools_used=turn_tools, agent=turn_agent,
+                        handoff_resolver=(router.owner_of if config.ROUTER_ENABLED else None),
                     )
                     history[:] = self._truncate_history(nonlocal_history, max_len=20)
                     dt = time.time() - turn_t0

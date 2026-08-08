@@ -143,6 +143,27 @@ class Router:
         logger.info("Router classify returned unrecognized label %r; falling back.", raw)
         return None
 
+    # -- misroute / handoff -------------------------------------------------
+    def owner_of(self, tool_names) -> Agent | None:
+        """Return the specialist whose advisory set owns ALL of `tool_names`,
+        or None if they span multiple specialists / none. Used by the optional
+        1-hop handoff to re-focus a turn whose tool calls all landed outside the
+        routed specialist. Never considers SHARED_TOOLS (sleep/stop) as owning."""
+        from reachy_mini_brain.agents import SHARED_TOOLS
+        names = [n for n in tool_names if n not in SHARED_TOOLS]
+        if not names:
+            return None
+        owners = set()
+        for tool in names:
+            found = [a.name for a in self.agents.values()
+                     if tool in a.tool_names and tool not in SHARED_TOOLS]
+            if len(found) != 1:
+                return None  # unowned or shared across specialists -> no handoff
+            owners.add(found[0])
+        if len(owners) != 1:
+            return None
+        return self.agents[owners.pop()]
+
     # -- main entry ---------------------------------------------------------
     def route(self, user_text: str, is_system_event: bool, deps,
               history=None) -> RouteDecision:

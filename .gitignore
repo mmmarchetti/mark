@@ -36,6 +36,9 @@ venv/
 *.log
 logs/
 
+# ── Local throwaway verify scripts (rsynced to a Dell scratch dir, not source) ─
+scratch/
+
 # ── OS cruft ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
