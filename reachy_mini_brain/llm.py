@@ -195,6 +195,36 @@ Bad: "Calendar: Mon 27 Jul 09:00 Virtual Interview; 09:45 PoC..."
 """
 
 
+# ---------------------------------------------------------------------------
+# Prompt decomposition for the multi-agent router (see agents/ + router.py).
+#
+# SYSTEM_PROMPT above is left BYTE-FOR-BYTE untouched. We SLICE it (never retype
+# it) into a stable cross-cutting preamble plus the domain-specific blocks, so a
+# specialist agent can be given the SHARED_PREAMBLE plus only its own focus text.
+# The monolith path (handle_turn with agent=None) keeps using SYSTEM_PROMPT via
+# _base_system_prompt and is therefore identical to the pre-refactor behaviour.
+#
+# The assertions guarantee the slices reconstruct the original exactly, so no
+# rule can be silently dropped between the preamble and a suffix (decomposition
+# drift is the top correctness risk of the refactor).
+# ---------------------------------------------------------------------------
+_IDX_CAL_CREATE = SYSTEM_PROMPT.index("CONFIRMATION RULE for actions that change something")
+_IDX_DESK = SYSTEM_PROMPT.index("CONTROLLING THE STANDING DESK AND ITS LIGHTS")
+_IDX_CAL_SPEAK = SYSTEM_PROMPT.index("SPEAKING ABOUT THE CALENDAR")
+assert _IDX_CAL_CREATE < _IDX_DESK < _IDX_CAL_SPEAK, "SYSTEM_PROMPT section order changed"
+
+# Stable across every specialist -> stays in the local model's cached prefix.
+SHARED_PREAMBLE = SYSTEM_PROMPT[:_IDX_CAL_CREATE]
+# Domain blocks, sliced verbatim (each keeps its own leading/trailing blank
+# lines, so concatenating them reproduces SYSTEM_PROMPT exactly).
+CALENDAR_CREATE_BLOCK = SYSTEM_PROMPT[_IDX_CAL_CREATE:_IDX_DESK]
+DESK_BLOCK = SYSTEM_PROMPT[_IDX_DESK:_IDX_CAL_SPEAK]
+CALENDAR_SPEAK_BLOCK = SYSTEM_PROMPT[_IDX_CAL_SPEAK:]
+# The monolith's domain tail == the original prompt minus the shared preamble.
+MONOLITH_SUFFIX = CALENDAR_CREATE_BLOCK + DESK_BLOCK + CALENDAR_SPEAK_BLOCK
+assert SHARED_PREAMBLE + MONOLITH_SUFFIX == SYSTEM_PROMPT, "prompt slices do not reconstruct SYSTEM_PROMPT"
+
+
 class LLMBrain:
     def __init__(self, tools: ToolRegistry, memory=None, profiles=None, metrics=None,
                  language=None, llm_mode=None) -> None:
@@ -496,6 +526,55 @@ class LLMBrain:
         parts.append(LANGUAGE_DIRECTIVE[reply_language])
         return "\n\n".join(parts)
 
+    def _shared_preamble(self) -> str:
+        """The stable, cross-cutting system text shared by EVERY specialist.
+
+        Constant across turns and across specialists, so together with the
+        always-full tools array it forms a prompt prefix the local mlx model can
+        keep cached even when the router switches domains. All per-turn/variable
+        content lives in _agent_context (placed after history) instead. See
+        docs/ARCHITECTURE.md section 6.
+        """
+        return SHARED_PREAMBLE
+
+    def _agent_context(self, agent, reply_language: str, speaker: str | None = None) -> str:
+        """Per-turn variable tail for a SPECIALIST turn: persona, recognized
+        speaker, memory, an ADVISORY tool-preference line, the specialist's focus
+        text, then the language directive. Placed AFTER history so switching
+        specialists recomputes only this short segment, never the cached prefix.
+
+        The specialist's tool subset is advisory only (named here) - the tools
+        array sent to the model is always the full set, and dispatch is never
+        gated, so a misroute can still reach the right tool.
+        """
+        parts = []
+        # Persona first, so it colours the rest of the tail (mirrors the monolith).
+        if self.profiles is not None:
+            parts.append(self.profiles.persona_text())
+        if speaker:
+            # Same wording as _base_system_prompt (kept in sync deliberately).
+            parts.append(
+                f"You have recognized the person you're talking to as {speaker} "
+                f"(by their face and/or voice). Greet or address them by name "
+                f"naturally when it fits; don't announce that you recognized them."
+            )
+        if self.memory is not None:
+            block = self.memory.as_prompt_block(speaker=speaker)
+            if block:
+                parts.append(block)
+        if agent.tool_names:
+            prefer = ", ".join(agent.tool_names)
+            parts.append(
+                f"You are in {agent.label} mode. Prefer these tools when they "
+                f"fit: {prefer}. You may still use any other tool if the user "
+                f"clearly needs it."
+            )
+        focus = (agent.focus_suffix or "").strip()
+        if focus:
+            parts.append(focus)
+        parts.append(LANGUAGE_DIRECTIVE[reply_language])
+        return "\n\n".join(parts)
+
     def prewarm_local(self) -> bool:
         """Prime the local model's prompt cache with Mark's real system+tools
         prefix so the FIRST real turn (and turns after a pause) are sub-second
@@ -537,6 +616,7 @@ class LLMBrain:
         interrupted=None,
         is_system_event=False,
         tools_used=None,
+        agent=None,
     ) -> list[dict[str, Any]]:
         """Run one full conversational turn (including any tool round-trips).
 
@@ -548,9 +628,26 @@ class LLMBrain:
         robot (e.g. "a person appeared, greet them"), not something the user
         said - it's injected as a system message so the model acts on it
         without treating it as user speech to answer.
+
+        `agent` selects the prompt layout. None or a monolith agent uses the
+        original single-prompt layout (byte-for-byte the pre-refactor prompt);
+        a specialist agent uses the split layout (stable SHARED_PREAMBLE prefix
+        + a per-turn context segment placed after history) so domain switches
+        don't evict the local model's cached prefix. The tools array is ALWAYS
+        the full set and dispatch is NEVER gated by the agent - a misroute can
+        still reach the right tool.
         """
         def _interrupted() -> bool:
             return interrupted is not None and interrupted.is_set()
+
+        def _persisted_history(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            # Drop the leading system prompt (msgs[0]) always, plus the per-turn
+            # context segment on the specialist path (it's variable and must not
+            # persist - keeping it would pollute the cached prefix next turn).
+            out = msgs[1:]
+            if context_msg is not None:
+                out = [m for m in out if m is not context_msg]
+            return out
 
         # Reply language is chosen MANUALLY (LanguageManager), not auto-detected
         # from STT: STT mis-detects short/accented utterances (e.g. "Gracias" ->
@@ -565,8 +662,25 @@ class LLMBrain:
         if reply_language not in LANGUAGE_DIRECTIVE:
             reply_language = config.DEFAULT_LANGUAGE
 
-        system_content = self._base_system_prompt(reply_language, getattr(deps, "current_speaker", None))
-        messages = [{"role": "system", "content": system_content}] + history
+        speaker = getattr(deps, "current_speaker", None)
+        use_specialist = agent is not None and not getattr(agent, "is_monolith", False)
+        # The per-turn context segment (specialist path only) must NOT persist
+        # into history - it's variable and would pollute the cached prefix next
+        # turn. Tracked by identity and filtered out of the returned history.
+        context_msg = None
+        if use_specialist:
+            # SPLIT layout: stable SHARED_PREAMBLE prefix (+ always-full tools)
+            # stays cached; the variable per-turn context goes AFTER history as
+            # its own system message, right before the user/event message, so a
+            # domain switch recomputes only this short tail.
+            context_seg = self._agent_context(agent, reply_language, speaker)
+            messages = [{"role": "system", "content": self._shared_preamble()}] + history
+            context_msg = {"role": "system", "content": context_seg}
+            messages.append(context_msg)
+        else:
+            # MONOLITH layout: identical to the pre-refactor code path.
+            system_content = self._base_system_prompt(reply_language, speaker)
+            messages = [{"role": "system", "content": system_content}] + history
         if is_system_event:
             # Spontaneous action: inject the directive as a system message.
             messages.append({"role": "system", "content": user_text})
@@ -627,7 +741,7 @@ class LLMBrain:
             # follow-up reply entirely - they're already asking something else.
             if _interrupted():
                 logger.info("Turn interrupted before follow-up reply; skipping it.")
-                return messages[1:]
+                return _persisted_history(messages)
 
             _t1 = time.time()
             # Follow-up reply after tools: stream it too (no more tools here).
@@ -638,5 +752,6 @@ class LLMBrain:
             if final_content:
                 messages.append({"role": "assistant", "content": final_content})
 
-        # Strip the system prompt back off before returning updated history.
-        return messages[1:]
+        # Strip the leading system prompt (and, on the specialist path, the
+        # per-turn context segment) back off before returning updated history.
+        return _persisted_history(messages)
