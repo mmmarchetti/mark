@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reachy Mini Brain — Control</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#FF9900; }
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto;
+           padding: 1.25rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .card { border: 1px solid #8884; border-radius: 12px; padding: 1rem 1.15rem;
+            margin: 0.9rem 0; }
+    .card h2 { font-size: 1rem; margin: 0 0 .6rem; opacity:.85; }
+    input[type=range] { width: 100%; }
+    button { font: inherit; padding:.45rem .8rem; border-radius:8px;
+             border:1px solid #8886; background:#8881; cursor:pointer; }
+    button.active { background: var(--accent); color:#000; border-color: var(--accent); }
+    .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+    .pill { font-size:.8rem; padding:.15rem .5rem; border-radius:999px; background:#8882; }
+    ul { padding-left: 0; list-style:none; margin:.4rem 0; }
+    li { display:flex; justify-content:space-between; gap:.5rem; padding:.2rem 0; }
+    li button { padding:.1rem .5rem; font-size:.75rem; }
+    .muted { opacity:.6; font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <h1>🤖 Reachy Mini Brain</h1>
+  <div class="row"><span id="state" class="pill">…</span>
+    <span id="lang" class="pill"></span></div>
+
+  <div class="card">
+    <h2>Sleep</h2>
+    <div class="row">
+      <button id="sleepBtn">😴 Go to sleep</button>
+      <button id="wakeBtn">👋 Wake up</button>
+    </div>
+    <div class="muted">Manually put Mark to sleep or wake him (same as saying it).</div>
+  </div>
+
+  <div class="card">
+    <h2>Language</h2>
+    <div class="row">
+      <button id="langEn">English</button>
+      <button id="langPt">Português</button>
+    </div>
+    <div class="muted">Mark always replies in the selected language.</div>
+  </div>
+
+  <div class="card">
+    <h2>Volume</h2>
+    <input type="range" id="vol" min="0" max="100" step="5" />
+    <div class="muted"><span id="volval">–</span>%</div>
+  </div>
+
+  <div class="card">
+    <h2>Sleep breathing volume</h2>
+    <input type="range" id="svol" min="0" max="100" step="5" />
+    <div class="muted"><span id="svolval">–</span>% (only the snoozing sound)</div>
+  </div>
+
+  <div class="card">
+    <h2>Microphone</h2>
+    <label for="mic">Sensitivity — higher = hears you when you talk quieter</label>
+    <input type="range" id="mic" min="0" max="100" step="5" />
+    <div class="muted"><span id="micval">–</span>%</div>
+    <label for="nr" style="margin-top:.6rem;display:block">Noise reduction — higher = ignores more background noise</label>
+    <input type="range" id="nr" min="0" max="100" step="5" />
+    <div class="muted"><span id="nrval">–</span>%</div>
+  </div>
+
+  <div class="card">
+    <h2>Personality</h2>
+    <div class="row" id="personas"></div>
+  </div>
+
+  <div class="card">
+    <h2>Face tracking</h2>
+    <div class="row">
+      <button id="trackOn">Follow me</button>
+      <button id="trackOff">Stop following</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Memory</h2>
+    <ul id="facts"></ul>
+    <div class="muted" id="nofacts" hidden>Nothing remembered yet.</div>
+  </div>
+
+  <div class="card">
+    <h2>Metrics</h2>
+    <div class="muted" id="metrics">…</div>
+  </div>
+
+  <div class="card">
+    <h2>History</h2>
+    <input type="text" id="tq" placeholder="search transcript…" style="width:100%;padding:.4rem;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit" />
+    <ul id="hist" style="max-height:220px;overflow:auto"></ul>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    async function api(path, body) {
+      const opt = body ? { method:'POST', headers:{'Content-Type':'application/json'},
+                           body: JSON.stringify(body) } : {};
+      const r = await fetch(path, opt); return r.json();
+    }
+    function render(s) {
+      $('state').textContent = s.asleep ? '😴 asleep' : '👂 awake';
+      $('lang').textContent = 'speaking: ' + (s.language === 'pt' ? 'Português' : 'English');
+      $('langEn').className = (s.language === 'en') ? 'active' : '';
+      $('langPt').className = (s.language === 'pt') ? 'active' : '';
+      $('sleepBtn').className = s.asleep ? 'active' : '';
+      $('wakeBtn').className = s.asleep ? '' : 'active';
+      if (document.activeElement !== $('vol') && s.volume != null) {
+        $('vol').value = s.volume; $('volval').textContent = s.volume;
+      }
+      if (document.activeElement !== $('svol') && s.sleep_volume != null) {
+        $('svol').value = s.sleep_volume; $('svolval').textContent = s.sleep_volume;
+      }
+      if (document.activeElement !== $('mic') && s.mic_sensitivity != null) {
+        $('mic').value = s.mic_sensitivity; $('micval').textContent = s.mic_sensitivity;
+      }
+      if (document.activeElement !== $('nr') && s.noise_reduction != null) {
+        $('nr').value = s.noise_reduction; $('nrval').textContent = s.noise_reduction;
+      }
+      const p = $('personas'); p.innerHTML = '';
+      for (const [k, label] of Object.entries(s.personalities || {})) {
+        const b = document.createElement('button');
+        b.textContent = label; b.className = (k === s.personality) ? 'active' : '';
+        b.onclick = async () => { await api('/api/personality', {personality:k}); refresh(); };
+        p.appendChild(b);
+      }
+      $('trackOn').className = s.tracking ? 'active' : '';
+      $('trackOff').className = s.tracking ? '' : 'active';
+      const ul = $('facts'); ul.innerHTML = '';
+      (s.facts || []).forEach(f => {
+        const li = document.createElement('li');
+        const span = document.createElement('span'); span.textContent = f;
+        const del = document.createElement('button'); del.textContent = '✕';
+        del.onclick = async () => { await api('/api/forget', {about:f}); refresh(); };
+        li.append(span, del); ul.appendChild(li);
+      });
+      $('nofacts').hidden = (s.facts || []).length > 0;
+    }
+    async function refreshMetrics() {
+      try {
+        const m = await api('/api/metrics');
+        const tools = (m.top_tools||[]).map(t => `${t.name}×${t.count}`).join(', ');
+        $('metrics').innerHTML =
+          `uptime ${m.uptime||'–'} · ${m.turns||0} turns · avg ${m.avg_turn_latency_s??'–'}s · VRAM ${m.vram||'–'}` +
+          (tools ? `<br>tools: ${tools}` : '');
+      } catch(e){}
+    }
+    async function refreshHist() {
+      try {
+        const r = await api('/api/transcript?limit=30&q=' + encodeURIComponent($('tq').value||''));
+        const ul = $('hist'); ul.innerHTML = '';
+        (r.entries||[]).forEach(e => {
+          const li = document.createElement('li');
+          li.style.display='block'; li.style.padding='.25rem 0';
+          li.innerHTML = `<span class="muted">${e.iso}</span> <b>${e.speaker}:</b> ${e.user_text||''}<br><span class="muted">↳ ${e.reply||''}</span>`;
+          ul.appendChild(li);
+        });
+      } catch(e){}
+    }
+    $('tq').oninput = () => refreshHist();
+    async function refresh() { try { render(await api('/api/status')); } catch(e){} refreshMetrics(); refreshHist(); }
+    $('vol').oninput = () => $('volval').textContent = $('vol').value;
+    $('vol').onchange = async () => { await api('/api/volume', {percent: +$('vol').value}); };
+    $('svol').oninput = () => $('svolval').textContent = $('svol').value;
+    $('svol').onchange = async () => { await api('/api/sleep_volume', {percent: +$('svol').value}); };
+    $('mic').oninput = () => $('micval').textContent = $('mic').value;
+    $('mic').onchange = async () => { await api('/api/mic', {sensitivity: +$('mic').value}); };
+    $('nr').oninput = () => $('nrval').textContent = $('nr').value;
+    $('nr').onchange = async () => { await api('/api/mic', {noise: +$('nr').value}); };
+    $('trackOn').onclick = async () => { await api('/api/tracking', {enabled:true}); refresh(); };
+    $('trackOff').onclick = async () => { await api('/api/tracking', {enabled:false}); refresh(); };
+    $('langEn').onclick = async () => { await api('/api/language', {language:'en'}); refresh(); };
+    $('langPt').onclick = async () => { await api('/api/language', {language:'pt'}); refresh(); };
+    $('sleepBtn').onclick = async () => { await api('/api/sleep', {asleep:true}); setTimeout(refresh, 1500); };
+    $('wakeBtn').onclick = async () => { await api('/api/sleep', {asleep:false}); setTimeout(refresh, 1500); };
+    refresh(); setInterval(refresh, 4000);
+  </script>
+</body>
+</html>

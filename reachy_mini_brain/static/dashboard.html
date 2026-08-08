@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mark — Live Metrics</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#FF9900; --ok:#3ba55d; --warn:#e0a000; --bad:#e02d2d; --bg:#8881; }
+    body { font-family: system-ui, sans-serif; max-width: 1000px; margin: 0 auto;
+           padding: 1rem; line-height: 1.4; }
+    h1 { font-size: 1.3rem; margin: .2rem 0 .1rem; }
+    .sub { opacity:.6; font-size:.8rem; margin-bottom:.8rem; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:.8rem; }
+    .card { border:1px solid #8884; border-radius:12px; padding:.8rem 1rem; }
+    .card h2 { font-size:.85rem; margin:0 0 .5rem; opacity:.75; text-transform:uppercase; letter-spacing:.03em; }
+    .big { font-size:1.8rem; font-weight:600; }
+    .unit { font-size:.9rem; opacity:.6; }
+    .row { display:flex; justify-content:space-between; gap:.5rem; padding:.12rem 0; font-size:.9rem; }
+    .row .k { opacity:.65; }
+    canvas { width:100%; height:44px; display:block; margin-top:.4rem; }
+    .pill { font-size:.72rem; padding:.12rem .5rem; border-radius:999px; background:var(--bg); }
+    .pill.ok { background:var(--ok); color:#fff; } .pill.bad { background:var(--bad); color:#fff; }
+    .pill.warn { background:var(--warn); color:#000; }
+    .ok  { color:var(--ok);  } .warn{ color:var(--warn); } .bad { color:var(--bad); }
+    .cores { display:grid; grid-template-columns:repeat(auto-fill,minmax(26px,1fr)); gap:3px; margin-top:.4rem; }
+    .core { height:22px; border-radius:3px; background:var(--bg); position:relative; }
+    .core > i { position:absolute; bottom:0; left:0; right:0; background:var(--accent); border-radius:3px; }
+    table { width:100%; border-collapse:collapse; font-size:.85rem; }
+    th,td { text-align:right; padding:.2rem .3rem; } th:first-child,td:first-child { text-align:left; }
+    th { opacity:.6; font-weight:600; }
+    a { color:var(--accent); }
+  </style>
+</head>
+<body>
+  <h1>🤖 Mark — Live Metrics</h1>
+  <div class="sub">
+    <span id="uptime">…</span> · <span id="turns">…</span> turns ·
+    updates every 2s · <a href="/">control panel</a>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>GPU (RTX 4060)</h2>
+      <div><span class="big" id="gpu-util">–</span><span class="unit">% util</span>
+           <span class="pill" id="gpu-temp">–</span></div>
+      <canvas id="gpu-spark"></canvas>
+      <div class="row"><span class="k">VRAM</span><span id="gpu-vram">–</span></div>
+    </div>
+
+    <div class="card">
+      <h2>CPU (22 cores)</h2>
+      <div><span class="big" id="cpu-util">–</span><span class="unit">% overall</span></div>
+      <canvas id="cpu-spark"></canvas>
+      <div class="cores" id="cpu-cores"></div>
+    </div>
+
+    <div class="card">
+      <h2>RAM</h2>
+      <div><span class="big" id="ram-util">–</span><span class="unit">%</span></div>
+      <canvas id="ram-spark"></canvas>
+      <div class="row"><span class="k">used</span><span id="ram-used">–</span></div>
+      <div class="row"><span class="k">Mark process</span><span id="ram-proc">–</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Pipeline latency</h2>
+      <table><thead><tr><th>stage</th><th>avg</th><th>p95</th><th>n</th></tr></thead>
+        <tbody id="stages"></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>LLM · Local <span class="pill" id="local-health">?</span></h2>
+      <div class="row"><span class="k">model</span><span id="local-model">–</span></div>
+      <div class="row"><span class="k">calls</span><span id="local-calls">–</span></div>
+      <div class="row"><span class="k">avg / p95</span><span id="local-lat">–</span></div>
+      <div class="row"><span class="k">tokens in/out</span><span id="local-tok">–</span></div>
+    </div>
+
+    <div class="card">
+      <h2>MacBook Pro M4 · LLM host <span class="pill" id="m4-health">?</span></h2>
+      <div><span class="big" id="m4-gpu">–</span><span class="unit">% GPU</span>
+           <span class="pill" id="m4-host">–</span></div>
+      <canvas id="m4-spark"></canvas>
+      <div class="row"><span class="k">VRAM (unified)</span><span id="m4-vram">–</span></div>
+      <div class="row"><span class="k">CPU</span><span id="m4-cpu">–</span></div>
+      <div class="row"><span class="k">RAM</span><span id="m4-ram">–</span></div>
+    </div>
+
+    <div class="card">
+      <h2>M4 · LLM memory (leak watch) <span class="pill" id="m4-llm-state">?</span></h2>
+      <div><span class="big" id="m4-llm-rss">–</span><span class="unit">GB · mlx_lm.server</span></div>
+      <canvas id="m4-llm-spark"></canvas>
+      <div class="row"><span class="k">M4 total RAM</span><span id="m4-llm-totram">–</span></div>
+      <div class="row"><span class="k">trend</span><span id="m4-llm-trend">–</span></div>
+    </div>
+
+    <div class="card">
+      <h2>LLM · Cloud (OpenAI)</h2>
+      <div class="row"><span class="k">calls</span><span id="cloud-calls">–</span></div>
+      <div class="row"><span class="k">avg / p95</span><span id="cloud-lat">–</span></div>
+      <div class="row"><span class="k">tokens in/out</span><span id="cloud-tok">–</span></div>
+      <div class="row"><span class="k">est. cost</span><span id="cloud-cost">–</span></div>
+      <div class="row"><span class="k">fallbacks (local→cloud)</span><span id="fallbacks">–</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Top tools</h2>
+      <table><tbody id="tools"></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>People recognized <span class="pill" id="people-count">–</span></h2>
+      <table><tbody id="people"></tbody></table>
+      <div class="row" id="people-none" style="opacity:.6" hidden><span>no one enrolled</span></div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const hist = { gpu: [], cpu: [], ram: [] };
+
+function fmt(v, d=1){ return (v===null||v===undefined) ? "–" : (typeof v==="number" ? v.toFixed(d) : v); }
+function cls(v, warn, bad){ return v>=bad ? "bad" : v>=warn ? "warn" : "ok"; }
+
+function spark(canvas, data, warn, bad){
+  const c = canvas.getContext("2d"), W = canvas.width = canvas.clientWidth, H = canvas.height = 44;
+  c.clearRect(0,0,W,H);
+  if(!data.length) return;
+  const max = Math.max(100, ...data), n = data.length, step = W/Math.max(1,n-1);
+  // threshold band
+  c.fillStyle = "rgba(224,45,45,.10)"; c.fillRect(0,0,W,H*(1-bad/max));
+  c.beginPath();
+  data.forEach((v,i)=>{ const x=i*step, y=H-(v/max)*H; i?c.lineTo(x,y):c.moveTo(x,y); });
+  const last = data[data.length-1];
+  c.strokeStyle = last>=bad ? "#e02d2d" : last>=warn ? "#e0a000" : "#FF9900";
+  c.lineWidth = 2; c.stroke();
+}
+
+// Sparkline for an ABSOLUTE value series (e.g. GB) that self-scales to a fixed
+// ceiling instead of 100 - used for the M4 LLM RAM leak watch. `ceil` is the
+// full-scale (24 GB total RAM); bad line at `badGb`.
+function sparkAbs(canvas, data, ceil, badGb){
+  const c = canvas.getContext("2d"), W = canvas.width = canvas.clientWidth, H = canvas.height = 44;
+  c.clearRect(0,0,W,H);
+  if(!data.length) return;
+  const max = Math.max(ceil, ...data), n = data.length, step = W/Math.max(1,n-1);
+  c.fillStyle = "rgba(224,45,45,.10)"; c.fillRect(0,0,W,H*(1-badGb/max));
+  c.beginPath();
+  data.forEach((v,i)=>{ const x=i*step, y=H-(v/max)*H; i?c.lineTo(x,y):c.moveTo(x,y); });
+  const last = data[data.length-1];
+  c.strokeStyle = last>=badGb ? "#e02d2d" : "#FF9900";
+  c.lineWidth = 2; c.stroke();
+}
+
+async function tick(){
+  let m; try { m = await (await fetch("/api/metrics")).json(); } catch(e){ return; }
+  $("uptime").textContent = m.uptime ?? "–";
+  $("turns").textContent = m.turns ?? 0;
+
+  // GPU
+  if(m.gpu){
+    $("gpu-util").textContent = fmt(m.gpu.util,0);
+    $("gpu-util").className = "big " + cls(m.gpu.util, 70, 95);
+    $("gpu-vram").innerHTML = `${m.gpu.mem_used}/${m.gpu.mem_total} MiB (${fmt(m.gpu.mem_percent)}%)`;
+    const t = $("gpu-temp"); t.textContent = fmt(m.gpu.temp_c,0)+"°C";
+    t.className = "pill " + cls(m.gpu.temp_c, 75, 87);
+  }
+  // CPU
+  if(m.cpu){
+    $("cpu-util").textContent = fmt(m.cpu.overall,0);
+    $("cpu-util").className = "big " + cls(m.cpu.overall, 70, 92);
+    const box = $("cpu-cores"); box.innerHTML = "";
+    (m.cpu.per_core||[]).forEach(v=>{
+      const d=document.createElement("div"); d.className="core";
+      const i=document.createElement("i"); i.style.height=v+"%";
+      if(v>=92) i.style.background="#e02d2d"; else if(v>=70) i.style.background="#e0a000";
+      d.title=v+"%"; d.appendChild(i); box.appendChild(d);
+    });
+  }
+  // RAM
+  if(m.ram){
+    $("ram-util").textContent = fmt(m.ram.percent,0);
+    $("ram-util").className = "big " + cls(m.ram.percent, 80, 93);
+    $("ram-used").textContent = `${fmt(m.ram.used_gb)} / ${fmt(m.ram.total_gb)} GB`;
+    $("ram-proc").textContent = m.ram.mark_rss_gb!=null ? fmt(m.ram.mark_rss_gb,2)+" GB" : "–";
+  }
+  // history sparklines (prefer server history, else accumulate)
+  const H = m.history||{};
+  spark($("gpu-spark"), H.gpu&&H.gpu.length?H.gpu:hist.gpu, 70, 95);
+  spark($("cpu-spark"), H.cpu&&H.cpu.length?H.cpu:hist.cpu, 70, 92);
+  spark($("ram-spark"), H.ram&&H.ram.length?H.ram:hist.ram, 80, 93);
+
+  // M4 (LLM host) — separate machine, pulled by the brain from the M4 agent
+  const m4 = m.m4||{}, m4h=$("m4-health");
+  if(m4.reachable===true){ m4h.textContent="up"; m4h.className="pill ok"; }
+  else if(m4.reachable===false){ m4h.textContent="down"; m4h.className="pill bad"; }
+  else { m4h.textContent="?"; m4h.className="pill"; }
+  $("m4-host").textContent = m4.host || "–";
+  const g4=m4.gpu||{}, c4=m4.cpu||{}, r4=m4.ram||{};
+  if(m4.reachable && g4.util!=null){
+    $("m4-gpu").textContent = fmt(g4.util,0);
+    $("m4-gpu").className = "big " + cls(g4.util, 70, 95);
+  } else { $("m4-gpu").textContent="–"; $("m4-gpu").className="big"; }
+  $("m4-vram").innerHTML = (g4.mem_used_gb!=null)
+    ? `${fmt(g4.mem_used_gb,1)}${g4.mem_total_gb!=null?" / "+fmt(g4.mem_total_gb,0):""} GB`
+      + (g4.mem_percent!=null?` (${fmt(g4.mem_percent)}%)`:"") : "–";
+  $("m4-cpu").textContent = c4.overall!=null
+    ? `${fmt(c4.overall,0)}%${c4.cores?" · "+c4.cores+" cores":""}` : "–";
+  $("m4-ram").textContent = r4.percent!=null
+    ? `${fmt(r4.used_gb,1)} / ${fmt(r4.total_gb,0)} GB (${fmt(r4.percent,0)}%)` : "–";
+  spark($("m4-spark"), (H.m4_gpu&&H.m4_gpu.length)?H.m4_gpu:[], 70, 95);
+
+  // M4 LLM memory leak-watch: mlx_lm.server RSS trend (GB). This is the series
+  // that climbs turn-over-turn from the KV/prompt cache and eventually OOMs.
+  const lp = m4.llm_proc||{}, totGb = (r4.total_gb)||24;
+  const st4 = $("m4-llm-state");
+  if(m4.reachable && lp.running){
+    $("m4-llm-rss").textContent = fmt(lp.rss_gb,2);
+    st4.textContent="running"; st4.className="pill ok";
+  } else if(m4.reachable){
+    $("m4-llm-rss").textContent = "–";
+    st4.textContent="server down"; st4.className="pill bad";
+  } else { $("m4-llm-rss").textContent="–"; st4.textContent="?"; st4.className="pill"; }
+  $("m4-llm-totram").textContent = r4.used_gb!=null ? `${fmt(r4.used_gb,1)} / ${fmt(totGb,0)} GB` : "–";
+  const rssH = (H.m4_llm_rss&&H.m4_llm_rss.length)?H.m4_llm_rss:[];
+  sparkAbs($("m4-llm-spark"), rssH, totGb, totGb-4);  // red band near the OOM ceiling
+  // Trend label. Prefer the M4 agent's OWN trend (it computes it from that
+  // server's own lifetime history, so it's immune to the restart-step artifact).
+  // Fall back to a RESTART-AWARE calc over the Dell-side history: only look at
+  // samples SINCE the last big jump/drop (a server restart), so re-running
+  // llm-on doesn't read as a "leak" by comparing the new process to the old one.
+  const el=$("m4-llm-trend");
+  if(lp.trend){
+    const t = lp.trend;
+    el.textContent = t;
+    el.className = t.indexOf("↑")>=0 ? "warn" : "ok";
+  } else if(rssH.length>=6){
+    // Trim to the segment after the last step-change > 0.5 GB (a restart).
+    let start = 0;
+    for(let i=1;i<rssH.length;i++){ if(Math.abs(rssH[i]-rssH[i-1])>0.5) start=i; }
+    const seg = rssH.slice(start).filter(v=>v>0);
+    if(seg.length>=6){
+      const half=Math.floor(seg.length/2), a=seg.slice(0,half), b=seg.slice(half);
+      const avg=arr=>arr.reduce((s,v)=>s+v,0)/(arr.length||1);
+      const d=avg(b)-avg(a);
+      if(d>0.3){ el.textContent="↑ rising "+fmt(d,2)+" GB"; el.className="warn"; }
+      else { el.textContent="→ flat "+fmt(Math.abs(d),2)+" GB"; el.className="ok"; }
+    } else { el.textContent="→ flat (just restarted)"; el.className="ok"; }
+  } else { el.textContent="–"; el.className=""; }
+
+  // stages
+  const st = m.stages||{}, order=["stt","llm","tts","turn"], tb=$("stages"); tb.innerHTML="";
+  order.forEach(k=>{ if(!st[k])return; const r=tb.insertRow();
+    r.insertCell().textContent=k.toUpperCase();
+    r.insertCell().textContent=st[k].avg_s!=null?st[k].avg_s+"s":"–";
+    r.insertCell().textContent=st[k].p95_s!=null?st[k].p95_s+"s":"–";
+    r.insertCell().textContent=st[k].n||0; });
+
+  // LLM local + cloud
+  const L=(m.llm&&m.llm.local)||{}, C=(m.llm&&m.llm.cloud)||{}, hh=(m.llm&&m.llm.local_health)||{};
+  const hp=$("local-health");
+  if(hh.reachable===true){ hp.textContent="up"; hp.className="pill ok"; }
+  else if(hh.reachable===false){ hp.textContent="down"; hp.className="pill bad"; }
+  else { hp.textContent="?"; hp.className="pill"; }
+  $("local-model").textContent = hh.model || "–";
+  $("local-calls").textContent = L.calls ?? 0;
+  $("local-lat").textContent = `${fmt(L.avg_latency_s,2)}s / ${fmt(L.p95_latency_s,2)}s`;
+  $("local-tok").textContent = `${L.prompt_tokens||0} / ${L.completion_tokens||0}`;
+  $("cloud-calls").textContent = C.calls ?? 0;
+  $("cloud-lat").textContent = `${fmt(C.avg_latency_s,2)}s / ${fmt(C.p95_latency_s,2)}s`;
+  $("cloud-tok").textContent = `${C.prompt_tokens||0} / ${C.completion_tokens||0}`;
+  $("cloud-cost").textContent = C.est_cost_usd!=null ? "$"+C.est_cost_usd.toFixed(4) : "n/a";
+  $("fallbacks").textContent = (m.llm&&m.llm.fallbacks) ?? 0;
+
+  // tools
+  const tt=$("tools"); tt.innerHTML="";
+  (m.top_tools||[]).forEach(t=>{ const r=tt.insertRow();
+    r.insertCell().textContent=t.name; const c=r.insertCell(); c.textContent=t.count; });
+}
+tick(); setInterval(tick, 2000);
+
+// People recognized (read-only) - polled slowly since it changes rarely.
+async function peopleTick(){
+  let r; try { r = await (await fetch("/api/people")).json(); } catch(e){ return; }
+  const people = r.people || [];
+  $("people-count").textContent = r.enabled ? people.length : "off";
+  const tb = $("people"); tb.innerHTML = "";
+  people.forEach(p => {
+    const row = tb.insertRow();
+    row.insertCell().textContent = p.name;
+    const c = row.insertCell();
+    const f = p.face ? '<span class="pill ok">face</span>' : '<span class="pill">no face</span>';
+    const v = p.voice ? '<span class="pill ok">voice</span>' : '<span class="pill">no voice</span>';
+    c.innerHTML = f + " " + v;
+  });
+  $("people-none").hidden = !(r.enabled && people.length === 0);
+}
+peopleTick(); setInterval(peopleTick, 10000);
+</script>
+</body>
+</html>

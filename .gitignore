@@ -1,0 +1,48 @@
+# ── Secrets ────────────────────────────────────────────────────────────────
+# Never commit API keys / tokens. Config reads everything from the environment.
+.env
+*.env
+*.key
+*.pem
+credentials*
+*secret*
+*token*
+
+# ── Large model assets (not source; downloaded/regenerated) ──────────────────
+# Piper TTS voices dominate the tree (~176 MB). They are fetched, not authored.
+voices/
+reachy_mini_brain/voices/
+*.onnx
+*.onnx.json
+
+# ── Python build/runtime artifacts ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# ── Editing / backup clutter ─────────────────────────────────────────────────
+*.bak
+*.bak-*
+*.orig
+*~
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS cruft ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Runtime state & BIOMETRICS (defense-in-depth) ────────────────────────────
+# These normally live in $HOME (outside this repo), but never commit them if a
+# copy lands here: face/voice embeddings and per-person memory are personal data.
+.reachy_logs/
+.reachy_mini_identities.json*
+.reachy_mini_brain_*.json

@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reachy Mini Brain — Control</title>
+  <style>
+    :root { color-scheme: light dark; --accent:#FF9900; }
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto;
+           padding: 1.25rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; }
+    .card { border: 1px solid #8884; border-radius: 12px; padding: 1rem 1.15rem;
+            margin: 0.9rem 0; }
+    .card h2 { font-size: 1rem; margin: 0 0 .6rem; opacity:.85; }
+    input[type=range] { width: 100%; }
+    button { font: inherit; padding:.45rem .8rem; border-radius:8px;
+             border:1px solid #8886; background:#8881; cursor:pointer; }
+    button.active { background: var(--accent); color:#000; border-color: var(--accent); }
+    button.danger { border-color:#e5484d; color:#e5484d; }
+    button.danger.armed { background:#e5484d; color:#fff; border-color:#e5484d; }
+    button:disabled { opacity:.5; cursor:default; }
+    .card.power { border-color:#e5484d55; }
+    .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+    .pill { font-size:.8rem; padding:.15rem .5rem; border-radius:999px; background:#8882; }
+    ul { padding-left: 0; list-style:none; margin:.4rem 0; }
+    li { display:flex; justify-content:space-between; gap:.5rem; padding:.2rem 0; }
+    li button { padding:.1rem .5rem; font-size:.75rem; }
+    .muted { opacity:.6; font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <h1>🤖 Reachy Mini Brain</h1>
+  <div class="row"><span id="state" class="pill">…</span>
+    <span id="lang" class="pill"></span>
+    <span id="deafState" class="pill" hidden>🙉 deaf</span></div>
+
+  <div class="card">
+    <h2>Sleep</h2>
+    <div class="row">
+      <button id="sleepBtn">😴 Go to sleep</button>
+      <button id="wakeBtn">👋 Wake up</button>
+    </div>
+    <div class="muted">Manually put Mark to sleep or wake him (same as saying it).</div>
+  </div>
+
+  <div class="card">
+    <h2>Meeting mode (deaf)</h2>
+    <div class="row">
+      <button id="deafOn">🙉 Stop listening</button>
+      <button id="deafOff">👂 Listen again</button>
+    </div>
+    <div class="muted">Mark ignores the microphone so he won't interrupt a meeting —
+      he stays awake (eyes open, no snoring), just deaf until you turn it back on.</div>
+  </div>
+
+  <div class="card">
+    <h2>Language</h2>
+    <div class="row">
+      <button id="langEn">English</button>
+      <button id="langPt">Português</button>
+    </div>
+    <div class="muted">Mark always replies in the selected language.</div>
+  </div>
+
+  <div class="card">
+    <h2>LLM backend</h2>
+    <div class="row">
+      <button id="llmAuto">⚡ Auto</button>
+      <button id="llmLocal">💻 Local (MacBook)</button>
+      <button id="llmCloud">☁️ API (cloud)</button>
+    </div>
+    <div class="muted" id="llmModeHelp">Which brain answers you.
+      <b>Auto</b>: the app picks by response time (fast local when it's healthy,
+      cloud when it isn't). <b>Local</b>: always the MacBook model. <b>API</b>:
+      always the OpenAI cloud.</div>
+  </div>
+
+  <div class="card" id="deskCard" hidden>
+    <h2>Desk &amp; lights</h2>
+    <div class="row" id="lightRow" hidden>
+      <button id="lightOn">💡 Lights on</button>
+      <button id="lightOff">🌙 Lights off</button>
+    </div>
+    <div class="row" id="deskRow" hidden style="margin-top:.5rem">
+      <button id="deskSit" class="deskmove">🪑 Sit</button>
+      <button id="deskStand" class="deskmove">🧍 Stand</button>
+      <button id="deskEnd" class="deskmove">🌆 End of day</button>
+      <button id="deskStop" class="danger">⏹ Stop</button>
+    </div>
+    <div class="muted" id="deskState">…</div>
+    <div class="muted">Lights switch immediately. Moving the desk is a physical
+      action, so each move button asks you to <b>tap again to confirm</b> before it
+      moves (self-stops at the saved height). <b>Stop</b> halts it right away.</div>
+  </div>
+
+  <div class="card">
+    <h2>Volume</h2>
+    <input type="range" id="vol" min="0" max="100" step="5" />
+    <div class="muted"><span id="volval">–</span>%</div>
+  </div>
+
+  <div class="card">
+    <h2>Sleep breathing volume</h2>
+    <input type="range" id="svol" min="0" max="100" step="5" />
+    <div class="muted"><span id="svolval">–</span>% (only the snoozing sound)</div>
+  </div>
+
+  <div class="card">
+    <h2>Microphone</h2>
+    <label for="mic">Sensitivity — higher = hears you when you talk quieter</label>
+    <input type="range" id="mic" min="0" max="100" step="5" />
+    <div class="muted"><span id="micval">–</span>%</div>
+    <label for="nr" style="margin-top:.6rem;display:block">Noise reduction — higher = ignores more background noise</label>
+    <input type="range" id="nr" min="0" max="100" step="5" />
+    <div class="muted"><span id="nrval">–</span>%</div>
+  </div>
+
+  <div class="card">
+    <h2>Personality</h2>
+    <div class="row" id="personas"></div>
+  </div>
+
+  <div class="card">
+    <h2>Face tracking</h2>
+    <div class="row">
+      <button id="trackOn">Follow me</button>
+      <button id="trackOff">Stop following</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Memory</h2>
+    <ul id="facts"></ul>
+    <div class="muted" id="nofacts" hidden>Nothing remembered yet.</div>
+  </div>
+
+  <div class="card" id="peopleCard" hidden>
+    <h2>People Mark recognizes</h2>
+    <ul id="people"></ul>
+    <div class="muted" id="nopeople" hidden>No one enrolled yet.</div>
+    <div class="row" style="margin-top:.5rem">
+      <input type="text" id="enrollName" placeholder="type the exact name"
+             style="flex:1;min-width:8rem;padding:.4rem;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit" />
+      <button id="enrollBtn">📸 Capture &amp; enroll</button>
+    </div>
+    <div class="muted" id="enrollMsg">Sit in front of Mark, look at the camera, type
+      the name, then tap Capture. Typing the name here avoids the mis-hearing you
+      get from enrolling by voice.</div>
+  </div>
+
+  <div class="card">
+    <h2>Metrics</h2>
+    <div class="muted" id="metrics">…</div>
+  </div>
+
+  <div class="card">
+    <h2>History</h2>
+    <input type="text" id="tq" placeholder="search transcript…" style="width:100%;padding:.4rem;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit" />
+    <ul id="hist" style="max-height:220px;overflow:auto"></ul>
+  </div>
+
+  <div class="card power">
+    <h2>⏻ Power</h2>
+    <div class="row">
+      <button id="shutdownBtn" class="danger">⏻ Shut down Mark</button>
+    </div>
+    <div class="muted" id="shutdownMsg">Safely parks Mark's head, turns motor torque off,
+      and stops his services (brain + daemon). When it says it's done, you can press the
+      physical OFF button. This does <b>not</b> touch the MacBook LLM.</div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    async function api(path, body) {
+      const opt = body ? { method:'POST', headers:{'Content-Type':'application/json'},
+                           body: JSON.stringify(body) } : {};
+      const r = await fetch(path, opt); return r.json();
+    }
+    function render(s) {
+      $('state').textContent = s.asleep ? '😴 asleep' : '👂 awake';
+      $('lang').textContent = 'speaking: ' + (s.language === 'pt' ? 'Português' : 'English');
+      $('langEn').className = (s.language === 'en') ? 'active' : '';
+      $('langPt').className = (s.language === 'pt') ? 'active' : '';
+      const mode = s.llm_mode || 'auto';
+      $('llmAuto').className  = (mode === 'auto')  ? 'active' : '';
+      $('llmLocal').className = (mode === 'local') ? 'active' : '';
+      $('llmCloud').className = (mode === 'cloud') ? 'active' : '';
+      // If no local backend is configured, Local/Auto can't use the MacBook - flag it.
+      const noLocal = (s.llm_local_configured === false);
+      $('llmLocal').disabled = noLocal;
+      $('llmModeHelp').style.opacity = noLocal ? '.7' : '1';
+      // Desk & lights card: show only what's actually configured.
+      const hasDesk = !!s.desk_configured, hasLight = !!s.light_configured;
+      $('deskCard').hidden = !(hasDesk || hasLight);
+      $('lightRow').hidden = !hasLight;
+      $('deskRow').hidden = !hasDesk;
+      $('sleepBtn').className = s.asleep ? 'active' : '';
+      $('wakeBtn').className = s.asleep ? '' : 'active';
+      $('deafState').hidden = !s.deaf;
+      $('deafOn').className = s.deaf ? 'active' : '';
+      $('deafOff').className = s.deaf ? '' : 'active';
+      if (document.activeElement !== $('vol') && s.volume != null) {
+        $('vol').value = s.volume; $('volval').textContent = s.volume;
+      }
+      if (document.activeElement !== $('svol') && s.sleep_volume != null) {
+        $('svol').value = s.sleep_volume; $('svolval').textContent = s.sleep_volume;
+      }
+      if (document.activeElement !== $('mic') && s.mic_sensitivity != null) {
+        $('mic').value = s.mic_sensitivity; $('micval').textContent = s.mic_sensitivity;
+      }
+      if (document.activeElement !== $('nr') && s.noise_reduction != null) {
+        $('nr').value = s.noise_reduction; $('nrval').textContent = s.noise_reduction;
+      }
+      const p = $('personas'); p.innerHTML = '';
+      for (const [k, label] of Object.entries(s.personalities || {})) {
+        const b = document.createElement('button');
+        b.textContent = label; b.className = (k === s.personality) ? 'active' : '';
+        b.onclick = async () => { await api('/api/personality', {personality:k}); refresh(); };
+        p.appendChild(b);
+      }
+      $('trackOn').className = s.tracking ? 'active' : '';
+      $('trackOff').className = s.tracking ? '' : 'active';
+      const ul = $('facts'); ul.innerHTML = '';
+      (s.facts || []).forEach(f => {
+        const li = document.createElement('li');
+        const span = document.createElement('span'); span.textContent = f;
+        const del = document.createElement('button'); del.textContent = '✕';
+        del.onclick = async () => { await api('/api/forget', {about:f}); refresh(); };
+        li.append(span, del); ul.appendChild(li);
+      });
+      $('nofacts').hidden = (s.facts || []).length > 0;
+      $('peopleCard').hidden = !s.identity_configured;
+    }
+    async function refreshMetrics() {
+      try {
+        const m = await api('/api/metrics');
+        const tools = (m.top_tools||[]).map(t => `${t.name}×${t.count}`).join(', ');
+        $('metrics').innerHTML =
+          `uptime ${m.uptime||'–'} · ${m.turns||0} turns · avg ${m.avg_turn_latency_s??'–'}s · VRAM ${m.vram||'–'}` +
+          (tools ? `<br>tools: ${tools}` : '');
+      } catch(e){}
+    }
+    async function refreshHist() {
+      try {
+        const r = await api('/api/transcript?limit=30&q=' + encodeURIComponent($('tq').value||''));
+        const ul = $('hist'); ul.innerHTML = '';
+        (r.entries||[]).forEach(e => {
+          const li = document.createElement('li');
+          li.style.display='block'; li.style.padding='.25rem 0';
+          li.innerHTML = `<span class="muted">${e.iso}</span> <b>${e.speaker}:</b> ${e.user_text||''}<br><span class="muted">↳ ${e.reply||''}</span>`;
+          ul.appendChild(li);
+        });
+      } catch(e){}
+    }
+    $('tq').oninput = () => refreshHist();
+    async function refresh() { try { render(await api('/api/status')); } catch(e){} refreshMetrics(); refreshHist(); }
+    $('vol').oninput = () => $('volval').textContent = $('vol').value;
+    $('vol').onchange = async () => { await api('/api/volume', {percent: +$('vol').value}); };
+    $('svol').oninput = () => $('svolval').textContent = $('svol').value;
+    $('svol').onchange = async () => { await api('/api/sleep_volume', {percent: +$('svol').value}); };
+    $('mic').oninput = () => $('micval').textContent = $('mic').value;
+    $('mic').onchange = async () => { await api('/api/mic', {sensitivity: +$('mic').value}); };
+    $('nr').oninput = () => $('nrval').textContent = $('nr').value;
+    $('nr').onchange = async () => { await api('/api/mic', {noise: +$('nr').value}); };
+    $('trackOn').onclick = async () => { await api('/api/tracking', {enabled:true}); refresh(); };
+    $('trackOff').onclick = async () => { await api('/api/tracking', {enabled:false}); refresh(); };
+    $('langEn').onclick = async () => { await api('/api/language', {language:'en'}); refresh(); };
+    $('langPt').onclick = async () => { await api('/api/language', {language:'pt'}); refresh(); };
+    $('llmAuto').onclick  = async () => { await api('/api/llm_mode', {mode:'auto'});  refresh(); };
+    $('llmLocal').onclick = async () => { await api('/api/llm_mode', {mode:'local'}); refresh(); };
+    $('llmCloud').onclick = async () => { await api('/api/llm_mode', {mode:'cloud'}); refresh(); };
+    $('sleepBtn').onclick = async () => { await api('/api/sleep', {asleep:true}); setTimeout(refresh, 1500); };
+    $('wakeBtn').onclick = async () => { await api('/api/sleep', {asleep:false}); setTimeout(refresh, 1500); };
+    $('deafOn').onclick = async () => { await api('/api/deaf', {deaf:true}); refresh(); };
+    $('deafOff').onclick = async () => { await api('/api/deaf', {deaf:false}); refresh(); };
+
+    // Shutdown: two-step (arm, then confirm) so a stray tap can't power Mark off.
+    // After the request the brain stops itself, so status polling will stop -
+    // we freeze the UI with the final instruction rather than trying to refresh.
+    let shutdownArmed = false, shuttingDown = false;
+    let armTimer = null;
+    const sBtn = $('shutdownBtn'), sMsg = $('shutdownMsg');
+    sBtn.onclick = async () => {
+      if (shuttingDown) return;
+      if (!shutdownArmed) {
+        shutdownArmed = true;
+        sBtn.classList.add('armed');
+        sBtn.textContent = '⚠️ Tap again to confirm';
+        sMsg.innerHTML = '<b>Are you sure?</b> Tap once more within 5s to shut Mark down. ' +
+          'This stops his services — you\'ll need to restart them (or reboot Mark) to use him again.';
+        clearTimeout(armTimer);
+        armTimer = setTimeout(() => {
+          shutdownArmed = false;
+          sBtn.classList.remove('armed');
+          sBtn.textContent = '⏻ Shut down Mark';
+          sMsg.textContent = 'Cancelled — Mark is still running.';
+        }, 5000);
+        return;
+      }
+      // Confirmed.
+      clearTimeout(armTimer);
+      shuttingDown = true; shutdownArmed = false;
+      sBtn.disabled = true; sBtn.classList.remove('armed');
+      sBtn.textContent = '⏻ Shutting down…';
+      sMsg.textContent = 'Parking head, turning torque off, stopping services…';
+      try {
+        const r = await api('/api/shutdown', {confirm:true});
+        sMsg.innerHTML = r.ok
+          ? '✅ ' + (r.message || 'Shutting down. Wait ~15s, then press the physical OFF button.')
+          : '❌ ' + (r.error || 'shutdown failed') + ' — Mark is still running.';
+        if (!r.ok) { shuttingDown = false; sBtn.disabled = false; sBtn.textContent = '⏻ Shut down Mark'; }
+      } catch (e) {
+        // The brain often stops before it can reply — that's success, not an error.
+        sMsg.innerHTML = '✅ Shutdown started. When Mark stops responding, wait a few '
+          + 'seconds, then press the physical OFF button. (Restart with <code>markctl start</code>.)';
+      }
+    };
+
+    // --- Desk & lights ---------------------------------------------------
+    // Lights: immediate. Desk moves: two-step (tap arms, tap-again confirms)
+    // so a stray tap can't move the physical desk - the panel's form of the
+    // owner's confirm-before-move rule. Live state is read on demand (not on
+    // the 4s status poll) so we don't hammer the Tuya devices.
+    async function refreshDeskState() {
+      if ($('deskCard').hidden) return;
+      try {
+        const d = await api('/api/desk_state');
+        const bits = [];
+        if (d.light_on !== null && d.light_on !== undefined)
+          bits.push('lights ' + (d.light_on ? 'on' : 'off'));
+        if (d.desk_reachable) {
+          if (d.height_cm != null) bits.push('desk ' + d.height_cm + ' cm');
+          if (d.level) bits.push('preset ' + String(d.level).replace('level_',''));
+          if (d.moving) bits.push('moving…');
+        } else if (d.light_on === null) {
+          bits.push('desk unreachable');
+        }
+        $('deskState').textContent = bits.join(' · ') || '…';
+      } catch(e){ $('deskState').textContent = ''; }
+    }
+    async function setLight(on) {
+      await api('/api/light', {on});
+      setTimeout(refreshDeskState, 400);
+    }
+    $('lightOn').onclick  = () => setLight(true);
+    $('lightOff').onclick = () => setLight(false);
+
+    // Two-step arm/confirm for each desk-move preset button.
+    const DESK_LABELS = { deskSit:'🪑 Sit', deskStand:'🧍 Stand', deskEnd:'🌆 End of day' };
+    const DESK_POS    = { deskSit:'sitting', deskStand:'standing', deskEnd:'end_of_day' };
+    let deskArmed = null, deskArmTimer = null;
+    function disarmDesk() {
+      clearTimeout(deskArmTimer);
+      if (deskArmed) {
+        $(deskArmed).classList.remove('armed');
+        $(deskArmed).textContent = DESK_LABELS[deskArmed];
+        deskArmed = null;
+      }
+    }
+    function armOrMove(id) {
+      if (deskArmed && deskArmed !== id) disarmDesk();  // switching target re-arms
+      if (deskArmed !== id) {
+        deskArmed = id;
+        $(id).classList.add('armed');
+        $(id).textContent = '⚠️ Tap to confirm';
+        clearTimeout(deskArmTimer);
+        deskArmTimer = setTimeout(disarmDesk, 5000);
+        $('deskState').textContent = 'Tap again within 5s to move the desk.';
+        return;
+      }
+      // Confirmed.
+      const pos = DESK_POS[id];
+      disarmDesk();
+      $('deskState').textContent = 'Moving…';
+      api('/api/desk_preset', {position: pos}).then(r => {
+        $('deskState').textContent = r.ok ? (r.message || 'Moving…')
+                                          : ('❌ ' + (r.error || 'desk move failed'));
+        setTimeout(refreshDeskState, 1500);
+      }).catch(() => { $('deskState').textContent = ''; });
+    }
+    $('deskSit').onclick   = () => armOrMove('deskSit');
+    $('deskStand').onclick = () => armOrMove('deskStand');
+    $('deskEnd').onclick   = () => armOrMove('deskEnd');
+    $('deskStop').onclick  = async () => {
+      disarmDesk();
+      await api('/api/desk_stop');
+      $('deskState').textContent = 'Stopped.';
+      setTimeout(refreshDeskState, 800);
+    };
+
+    // --- People (face + voice recognition) -------------------------------
+    // Enroll by TYPING the exact name (voice enroll mishears it) + a camera
+    // capture. Rename fixes a garbled name without losing the face/voice data.
+    function badge(on, label) {
+      return `<span class="pill" style="opacity:${on?1:.4}">${on?'✓':'✕'} ${label}</span>`;
+    }
+    async function refreshPeople() {
+      if ($('peopleCard').hidden) return;
+      try {
+        const r = await api('/api/people');
+        const ul = $('people'); ul.innerHTML = '';
+        (r.people || []).forEach(p => {
+          const li = document.createElement('li');
+          li.style.alignItems = 'center';
+          const left = document.createElement('span');
+          left.innerHTML = `<b>${p.name}</b> &nbsp; ${badge(p.face,'face')} ${badge(p.voice,'voice')}`;
+          const btns = document.createElement('span'); btns.className = 'row';
+          const ren = document.createElement('button'); ren.textContent = '✎ Rename';
+          ren.onclick = async () => {
+            const nn = prompt('Rename "' + p.name + '" to:', p.name);
+            if (nn && nn.trim() && nn.trim() !== p.name) {
+              await api('/api/identity_rename', {old: p.name, new: nn.trim()});
+              refreshPeople();
+            }
+          };
+          const del = document.createElement('button'); del.textContent = '✕ Remove';
+          del.className = 'danger';
+          del.onclick = async () => {
+            if (confirm('Stop recognizing "' + p.name + '"? (You can re-enroll later.)')) {
+              await api('/api/identity_forget', {name: p.name});
+              refreshPeople();
+            }
+          };
+          btns.append(ren, del);
+          li.append(left, btns); ul.appendChild(li);
+        });
+        $('nopeople').hidden = (r.people || []).length > 0;
+      } catch(e){}
+    }
+    $('enrollBtn').onclick = async () => {
+      const name = ($('enrollName').value || '').trim();
+      if (!name) { $('enrollMsg').textContent = 'Type the name first.'; return; }
+      $('enrollBtn').disabled = true;
+      $('enrollMsg').textContent = 'Capturing…';
+      try {
+        const r = await api('/api/enroll', {name});
+        if (r.ok) {
+          const got = [];
+          if (r.captured && r.captured.face) got.push('face');
+          if (r.captured && r.captured.voice) got.push('voice');
+          $('enrollMsg').textContent = '✅ ' + (r.message || 'Enrolled ' + name)
+            + (got.length ? ' (' + got.join(' + ') + ')' : '');
+          $('enrollName').value = '';
+          refreshPeople();
+        } else {
+          $('enrollMsg').textContent = '❌ ' + (r.message || r.error || 'enroll failed');
+        }
+      } catch(e){ $('enrollMsg').textContent = '❌ enroll failed'; }
+      $('enrollBtn').disabled = false;
+    };
+
+    refresh(); refreshDeskState(); refreshPeople();
+    setInterval(() => { if (!shuttingDown) refresh(); }, 4000);
+    setInterval(() => { if (!shuttingDown) refreshDeskState(); }, 10000);
+    setInterval(() => { if (!shuttingDown) refreshPeople(); }, 15000);
+  </script>
+</body>
+</html>
