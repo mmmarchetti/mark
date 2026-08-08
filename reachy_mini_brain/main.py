@@ -63,6 +63,8 @@ from reachy_mini_brain.watchdog import RecoveryWatchdog
 from reachy_mini_brain.weather import Weather
 from reachy_mini_brain.websearch import WebSearch
 from reachy_mini_brain.llm import LLMBrain
+from reachy_mini_brain.agents import build_agents, MONOLITH_AGENT
+from reachy_mini_brain.router import Router
 from reachy_mini_brain.stt import STTEngine
 from reachy_mini_brain.tts import TTSEngine
 from reachy_mini_brain.tools import ToolDependencies, build_default_registry
@@ -238,6 +240,13 @@ class ReachyMiniBrain(ReachyMiniApp):
         tools = build_default_registry(available_moves)
         brain = LLMBrain(tools, memory=memory, profiles=profiles, metrics=metrics,
                          language=language, llm_mode=llm_mode)
+        # Multi-agent gate/router. Reuses the brain's CLOUD client+model for the
+        # rare ambiguous-turn classify (never the local one - that would evict
+        # the local prompt cache). Behind config.ROUTER_ENABLED (default off);
+        # when off, every turn uses MONOLITH_AGENT (pre-refactor behaviour).
+        specialists = build_agents(tools)
+        router = Router(agents=specialists, classify_client=brain.client,
+                        classify_model=config.OPENAI_MODEL)
         sleeping = threading.Event()
 
         # Browser control panel (volume, personality, tracking, memory, status).
@@ -634,11 +643,25 @@ class ReachyMiniBrain(ReachyMiniApp):
                             # LLM answer naturally; a later clear yes still works.
                             logger.info("Desk confirmation unclear (%r); keeping it armed.", text)
 
+                # --- GATE / ROUTER (tier 1) ---
+                # Pick the specialist for this turn. Off by default -> always the
+                # MONOLITH_AGENT, i.e. the pre-refactor single-prompt behaviour.
+                # Routing never gates tool dispatch; it only chooses the prompt
+                # focus, so a misroute can still reach the right tool.
+                if config.ROUTER_ENABLED:
+                    decision = router.route(text, system_event, deps, history)
+                    turn_agent = decision.agent
+                    deps.current_specialist = turn_agent.name
+                    logger.info("[route] specialist=%s src=%s scores=%s",
+                                turn_agent.name, decision.source, decision.scores)
+                else:
+                    turn_agent = MONOLITH_AGENT
+
                 try:
                     nonlocal_history = brain.handle_turn(
                         deps, history, text, language, on_speak,
                         interrupted=interrupted, is_system_event=system_event,
-                        tools_used=turn_tools,
+                        tools_used=turn_tools, agent=turn_agent,
                     )
                     history[:] = self._truncate_history(nonlocal_history, max_len=20)
                     dt = time.time() - turn_t0

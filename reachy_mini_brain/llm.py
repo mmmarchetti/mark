@@ -587,8 +587,17 @@ class LLMBrain:
         lang = self.language.active if self.language is not None else config.DEFAULT_LANGUAGE
         if lang not in LANGUAGE_DIRECTIVE:
             lang = config.DEFAULT_LANGUAGE
+        # Warm whatever prefix REAL turns will present as messages[0]. With the
+        # router on, specialist turns lead with the stable SHARED_PREAMBLE (the
+        # variable content moves after history), so warming that one prefix
+        # primes the cache for ALL six specialists at once. With the router off,
+        # warm the monolith prompt exactly as before.
+        if config.ROUTER_ENABLED:
+            system_content = self._shared_preamble()
+        else:
+            system_content = self._base_system_prompt(lang, None)
         messages = [
-            {"role": "system", "content": self._base_system_prompt(lang, None)},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": "hi"},
         ]
         # Don't wait if a real turn holds the lock - just skip (that turn warms

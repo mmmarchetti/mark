@@ -64,6 +64,19 @@ LLM_AUTO_TARGET_S = float(os.getenv("REACHY_LLM_AUTO_TARGET_S", "4.0"))
 # coding session just press the API (cloud) button - zero swaps, coder stays warm.
 LLM_AUTO_BACKOFF_MAX_S = float(os.getenv("REACHY_LLM_AUTO_BACKOFF_MAX_S", "300"))
 
+# --- Multi-agent router (gate + per-task specialists; see docs/ARCHITECTURE.md) ---
+# All default OFF during rollout: with the router disabled the brain uses the
+# MONOLITH_AGENT and behaves byte-for-byte like the pre-refactor single prompt.
+# ROUTER_ENABLED: turn deterministic keyword+sticky routing on.
+ROUTER_ENABLED = os.getenv("MARK_ROUTER_ENABLED", "0") not in ("0", "false", "no")
+# ROUTER_CLASSIFY_ENABLED: on a genuine keyword tie, allow ONE tiny CLOUD-only
+# classify to break it (a local classify would evict the local prompt cache).
+ROUTER_CLASSIFY_ENABLED = os.getenv("MARK_ROUTER_CLASSIFY_ENABLED", "0") not in ("0", "false", "no")
+# ROUTER_HANDOFF_ENABLED: if the first completion's tool calls all fall outside
+# the routed specialist's advisory set, re-run the turn once for the owning
+# specialist (cheap - only the cached-prefix tail recomputes).
+ROUTER_HANDOFF_ENABLED = os.getenv("MARK_ROUTER_HANDOFF_ENABLED", "0") not in ("0", "false", "no")
+
 # --- M4 host metrics (the MacBook Pro that runs the local LLM) ---
 # The local model runs on a *different* machine than this brain, so the dashboard
 # can only show that Mac's CPU/RAM/GPU/VRAM if the brain PULLS them. A tiny
