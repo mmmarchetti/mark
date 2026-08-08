@@ -56,6 +56,11 @@ class ToolDependencies:
     # loop re-asserts it periodically so nothing can silently leave it off;
     # only an explicit "stop following" from the user clears this.
     tracking_desired: bool = True
+    # Name of the specialist agent the router last selected for this session
+    # (see router.py / agents/). Purely advisory: it drives the per-turn focus
+    # segment and sticky routing; tool DISPATCH is never gated by it, so a
+    # misroute can still reach the right tool. None until the router runs.
+    current_specialist: str | None = None
 
 
 class Tool:
@@ -87,7 +92,28 @@ class ToolRegistry:
         self._tools[tool.name] = tool
 
     def to_openai_tools(self) -> list[Dict[str, Any]]:
+        # ALWAYS the full set. The router narrows intent via an advisory prompt
+        # line, NOT by trimming this array — trimming would change the local
+        # model's cached prompt prefix and evict the single mlx cache slot on
+        # every domain switch (~0.6s -> ~8s cold). See docs/ARCHITECTURE.md §6.
         return [t.to_openai_tool() for t in self._tools.values()]
+
+    def is_known(self, name: str) -> bool:
+        """True if `name` is a registered tool. Used only for misroute/handoff
+        detection; never gates dispatch."""
+        return name in self._tools
+
+    def subset(self, names) -> list[Dict[str, Any]]:
+        """Advisory subset of the OpenAI tool schemas, preserving registration
+        order and silently skipping unknown names. NOT used to build the tools
+        array sent to the model (that stays full — see to_openai_tools); this is
+        for logging / misroute analysis only."""
+        wanted = set(names)
+        return [
+            t.to_openai_tool()
+            for name, t in self._tools.items()
+            if name in wanted
+        ]
 
     def dispatch(self, deps: ToolDependencies, name: str, arguments: Dict[str, Any]) -> str:
         tool = self._tools.get(name)
