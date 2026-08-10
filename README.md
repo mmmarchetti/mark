@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🤖 Mark
+# Mark
 
 **A bilingual, expressive, always-on voice companion for the [Reachy Mini](https://www.pollen-robotics.com/) desktop robot.**
 
@@ -71,7 +71,7 @@ array**, and a **speaker**. Mark turns that body into a responsive, conversation
 Mark exposes his abilities to the LLM as **28 function-calling tools**, grouped here by domain
 (this grouping is also the basis of the [multi-agent refactor](docs/ARCHITECTURE.md)):
 
-### 💬 Chat & Companion
+### Chat & Companion
 | Ability | What it does |
 |---|---|
 | Bilingual conversation | Understands & replies in pt-BR or en-US; never mixes languages in one reply |
@@ -81,7 +81,7 @@ Mark exposes his abilities to the LLM as **28 function-calling tools**, grouped 
 | `set_personality` | Switch persona/profile (e.g. a chattier or a storyteller mode) |
 | Inline translation | Translate between languages on the fly, just by asking |
 
-### 🕺 Body & Motion
+### Body & Motion
 | Ability | What it does |
 |---|---|
 | `play_emotion` | Play a recorded expressive movement to react physically |
@@ -91,13 +91,13 @@ Mark exposes his abilities to the LLM as **28 function-calling tools**, grouped 
 | `head_tracking` | Turn automatic face-tracking on/off |
 | `look_around` | Rotate the body to scan and describe the whole room |
 
-### 👁️ Vision & Identity
+### Vision & Identity
 | Ability | What it does |
 |---|---|
 | `camera` | Take a picture and describe what's in front of him (local vision model) |
 | `identity` | Enroll / forget people — recognizes them by **face and voice**, greets by name |
 
-### 🌐 Knowledge & Info
+### Knowledge & Info
 | Ability | What it does |
 |---|---|
 | `web_search` | Search the internet for current/factual info |
@@ -107,21 +107,21 @@ Mark exposes his abilities to the LLM as **28 function-calling tools**, grouped 
 | `weather` | Current conditions and today's forecast |
 | `directions` | Travel time / directions between places (e.g. your commute) |
 
-### ✅ Productivity
+### Productivity
 | Ability | What it does |
 |---|---|
 | `set_reminder` / `reminders` | Set timers, reminders, and alarms; list or cancel them |
 | `todo` | Manage a personal to-do list |
 | `focus_session` | Run a Pomodoro-style work/break session with voice check-ins |
 | `calendar_agenda` | Read what's coming up on your Google Calendar |
-| `calendar_create` | Create a calendar event (always confirm-before-create) |
+| `calendar_create_event` | Create a calendar event (always confirm-before-create) |
 
-### 🖥️ Desk & Home
+### Desk & Home
 | Ability | What it does |
 |---|---|
 | `desk` (+ lights) | Raise/lower a Tuya standing desk, sit/stand presets, "start/finish my day" routines, and switch the desk lights. Every **desk move is confirm-before-move** (a sensitive physical action). |
 
-### ⚙️ System behaviors (mostly automatic)
+### System behaviors (mostly automatic)
 `go_to_sleep` · `stop_listening` · presence-based greetings · direction-of-arrival head turns ·
 idle "life" movements · barge-in · a **recovery watchdog** · a meeting notifier and optional
 morning briefing.
@@ -137,10 +137,24 @@ Mark is split into a **daemon** and a **brain** — plus optional helpers:
 - **Local LLM host** — a nearby Mac running an `mlx` server (Qwen3-30B), reached over Tailscale, for sub-second answers.
 - **Mac bridge** (optional) — brokers Google Calendar and other personal integrations.
 
-The brain today runs as a **single LLM loop** with all 28 tools and one large system prompt. It is
-being refactored into a **gate/router agent + six per-task specialist agents** for clearer
-separation of concerns — see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the full current
-and target designs, the latency/prompt-cache constraints, and the routing algorithm.
+The brain supports **two interchangeable layouts**, selected at runtime by a single flag:
+
+- **Monolith** (default) — one LLM loop with all 28 tools and one large system prompt. This is
+  the byte-for-byte pre-refactor behavior and the guaranteed rollback point.
+- **Router + specialists** — a deterministic **gate/router** picks one of **six per-task
+  specialist agents** (Chat, Body, Vision, Knowledge, Productivity, Desk), each with a focused
+  prompt suffix and an advisory tool subset. The router resolves the vast majority of turns with
+  **zero extra LLM calls** (system-event map, bilingual keyword score, and sticky continuation);
+  a small cloud-only classify runs only on a genuine tie. An optional bounded **one-hop handoff**
+  can re-route a pure tool-call turn to the specialist that owns those tools.
+
+Both layouts share the same streaming loop, the full 28-tool array, and local-first + cloud
+fallback. The split is designed around the local model's **single prompt-cache slot**: a stable
+`SHARED_PREAMBLE` + full tool array stays cached while only a short per-specialist context tail
+changes, so domain switches stay warm. A live stress test confirmed six alternating domain
+switches all stayed sub-second on the local Qwen3 model — no cache eviction. See
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the full designs, the prompt-cache
+constraint, the routing algorithm, and the rollout flags.
 
 ---
 
