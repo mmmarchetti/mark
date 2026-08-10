@@ -65,10 +65,12 @@ LLM_AUTO_TARGET_S = float(os.getenv("REACHY_LLM_AUTO_TARGET_S", "4.0"))
 LLM_AUTO_BACKOFF_MAX_S = float(os.getenv("REACHY_LLM_AUTO_BACKOFF_MAX_S", "300"))
 
 # --- Multi-agent router (gate + per-task specialists; see docs/ARCHITECTURE.md) ---
-# All default OFF during rollout: with the router disabled the brain uses the
-# MONOLITH_AGENT and behaves byte-for-byte like the pre-refactor single prompt.
+# ROUTER_ENABLED now defaults ON: the deterministic gate + six specialists are the
+# standard layout after the live rollout (cache preserved across domain switches;
+# routing 30/30). Set MARK_ROUTER_ENABLED=0 for the instant revert to MONOLITH_AGENT
+# (byte-for-byte the pre-refactor single prompt). The other two stay OFF by default.
 # ROUTER_ENABLED: turn deterministic keyword+sticky routing on.
-ROUTER_ENABLED = os.getenv("MARK_ROUTER_ENABLED", "0") not in ("0", "false", "no")
+ROUTER_ENABLED = os.getenv("MARK_ROUTER_ENABLED", "1") not in ("0", "false", "no")
 # ROUTER_CLASSIFY_ENABLED: on a genuine keyword tie, allow ONE tiny CLOUD-only
 # classify to break it (a local classify would evict the local prompt cache).
 ROUTER_CLASSIFY_ENABLED = os.getenv("MARK_ROUTER_CLASSIFY_ENABLED", "0") not in ("0", "false", "no")
